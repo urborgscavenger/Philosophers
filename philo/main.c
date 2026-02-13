@@ -6,7 +6,7 @@
 /*   By: mbauer <mbauer@student.42.fr>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/02/13 15:54:21 by mbauer            #+#    #+#             */
-/*   Updated: 2026/02/13 17:33:16 by mbauer           ###   ########.fr       */
+/*   Updated: 2026/02/13 17:46:42 by mbauer           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -119,12 +119,27 @@ void	print_status(t_philo *philo, char *status)
 	pthread_mutex_unlock(&philo->sim->print_mutex);
 }
 
-void	take_forks(t_philo *philo)
+int	take_forks(t_philo *philo)
 {
-	pthread_mutex_lock(philo->left_fork);
-	print_status(philo, "has taken a fork");
-	pthread_mutex_lock(philo->right_fork);
-	print_status(philo, "has taken a fork");
+	if (!philo->right_fork)
+		return (0); // Can't take both forks
+	if (philo->id % 2 == 1)
+	{
+		// Odd: take left first
+		pthread_mutex_lock(philo->left_fork);
+		print_status(philo, "has taken a fork");
+		pthread_mutex_lock(philo->right_fork);
+		print_status(philo, "has taken a fork");
+	}
+	else
+	{
+		// Even: take right first
+		pthread_mutex_lock(philo->right_fork);
+		print_status(philo, "has taken a fork");
+		pthread_mutex_lock(philo->left_fork);
+		print_status(philo, "has taken a fork");
+	}
+	return (1);
 }
 
 void	eat(t_philo *philo)
@@ -155,9 +170,11 @@ void	*philo_routine(void *arg)
 	while (!philo->sim->someone_died)
 	{
 		print_status(philo, "is thinking");
-		take_forks(philo);
-		eat(philo);
-		put_forks(philo);
+		if (take_forks(philo))
+		{
+			eat(philo);
+			put_forks(philo);
+		}
 		sleep_philo(philo);
 	}
 	return (NULL);
@@ -167,6 +184,7 @@ void	*monitor_routine(void *arg)
 {
 	t_sim	*sim;
 	int		i;
+	int		all_eaten;
 
 	sim = (t_sim *)arg;
 	while (!sim->someone_died)
@@ -181,6 +199,22 @@ void	*monitor_routine(void *arg)
 				return (NULL);
 			}
 			i++;
+		}
+		if (sim->config.num_meals != -1)
+		{
+			all_eaten = 1;
+			i = 0;
+			while (i < sim->config.num_philos)
+			{
+				if (sim->philos[i].meals_eaten < sim->config.num_meals)
+					all_eaten = 0;
+				i++;
+			}
+			if (all_eaten)
+			{
+				sim->someone_died = 1; // Stop simulation
+				return (NULL);
+			}
 		}
 		usleep(1000); // check every 1ms
 	}
@@ -232,8 +266,11 @@ int	init_sim(t_sim *sim, t_config config)
 		sim->philos[i].id = i + 1;
 		sim->philos[i].sim = sim;
 		sim->philos[i].left_fork = &sim->forks[i];
-		sim->philos[i].right_fork = &sim->forks[(i + 1) % config.num_philos];
-		sim->philos[i].last_meal = 0;
+		if (config.num_philos == 1)
+			sim->philos[i].right_fork = NULL; // Only one fork
+		else
+			sim->philos[i].right_fork = &sim->forks[(i + 1) % config.num_philos];
+		sim->philos[i].last_meal = get_current_time(sim->start_time); // Start from now
 		sim->philos[i].meals_eaten = 0;
 		i++;
 	}
