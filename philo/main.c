@@ -6,7 +6,7 @@
 /*   By: mbauer <mbauer@student.42.fr>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/02/13 15:54:21 by mbauer            #+#    #+#             */
-/*   Updated: 2026/02/13 16:07:00 by mbauer           ###   ########.fr       */
+/*   Updated: 2026/02/13 17:19:22 by mbauer           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -103,15 +103,77 @@ int	parse_args(int argc, char **argv, t_config *config)
 	return (0);
 }
 
+int	init_sim(t_sim *sim, t_config config)
+{
+	int	i;
+
+	sim->config = config;
+	sim->philos = malloc(sizeof(t_philo) * config.num_philos);
+	if (!sim->philos)
+		return (1);
+	sim->forks = malloc(sizeof(pthread_mutex_t) * config.num_philos);
+	if (!sim->forks)
+	{
+		free(sim->philos);
+		return (1);
+	}
+	i = 0;
+	while (i < config.num_philos)
+	{
+		if (pthread_mutex_init(&sim->forks[i], NULL))
+		{
+			// Cleanup previous mutexes
+			while (--i >= 0)
+				pthread_mutex_destroy(&sim->forks[i]);
+			free(sim->forks);
+			free(sim->philos);
+			return (1);
+		}
+		i++;
+	}
+	if (pthread_mutex_init(&sim->print_mutex, NULL))
+	{
+		i = 0;
+		while (i < config.num_philos)
+			pthread_mutex_destroy(&sim->forks[i++]);
+		free(sim->forks);
+		free(sim->philos);
+		return (1);
+	}
+	gettimeofday(&sim->start_time, NULL);
+	sim->someone_died = 0;
+	i = 0;
+	while (i < config.num_philos)
+	{
+		sim->philos[i].id = i + 1;
+		sim->philos[i].sim = sim;
+		sim->philos[i].left_fork = &sim->forks[i];
+		sim->philos[i].right_fork = &sim->forks[(i + 1) % config.num_philos];
+		sim->philos[i].last_meal = 0;
+		sim->philos[i].meals_eaten = 0;
+		i++;
+	}
+	return (0);
+}
+
 int	main(int argc, char **argv)
 {
 	t_config	config;
+	t_sim		sim;
 
 	if (parse_args(argc, argv, &config))
 		return (1);
+	if (init_sim(&sim, config))
+	{
+		printf("Error: Failed to initialize simulation.\n");
+		return (1);
+	}
 	// Hier kommt später der Rest des Programms
-	printf("Parsed successfully: philos=%d, die=%d, eat=%d, sleep=%d, meals=%d\n",
+	printf("Parsed and initialized successfully: philos=%d, die=%d, eat=%d, sleep=%d, meals=%d\n",
 		   config.num_philos, config.time_to_die, config.time_to_eat, config.time_to_sleep, config.num_meals);
+	// Cleanup
+	free(sim.philos);
+	free(sim.forks);
 	return (0);
 }
 
