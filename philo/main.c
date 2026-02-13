@@ -6,7 +6,7 @@
 /*   By: mbauer <mbauer@student.42.fr>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/02/13 15:54:21 by mbauer            #+#    #+#             */
-/*   Updated: 2026/02/13 17:19:22 by mbauer           ###   ########.fr       */
+/*   Updated: 2026/02/13 17:31:13 by mbauer           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <sys/time.h>
+#include <unistd.h>
 
 typedef struct s_config
 {
@@ -103,6 +104,89 @@ int	parse_args(int argc, char **argv, t_config *config)
 	return (0);
 }
 
+long long	get_current_time(struct timeval start)
+{
+	struct timeval	now;
+
+	gettimeofday(&now, NULL);
+	return ((now.tv_sec - start.tv_sec) * 1000 + (now.tv_usec - start.tv_usec) / 1000);
+}
+
+void	print_status(t_philo *philo, char *status)
+{
+	pthread_mutex_lock(&philo->sim->print_mutex);
+	printf("%lld %d %s\n", get_current_time(philo->sim->start_time), philo->id, status);
+	pthread_mutex_unlock(&philo->sim->print_mutex);
+}
+
+void	take_forks(t_philo *philo)
+{
+	pthread_mutex_lock(philo->left_fork);
+	print_status(philo, "has taken a fork");
+	pthread_mutex_lock(philo->right_fork);
+	print_status(philo, "has taken a fork");
+}
+
+void	eat(t_philo *philo)
+{
+	print_status(philo, "is eating");
+	philo->last_meal = get_current_time(philo->sim->start_time);
+	usleep(philo->sim->config.time_to_eat * 1000);
+	philo->meals_eaten++;
+}
+
+void	put_forks(t_philo *philo)
+{
+	pthread_mutex_unlock(philo->left_fork);
+	pthread_mutex_unlock(philo->right_fork);
+}
+
+void	sleep_philo(t_philo *philo)
+{
+	print_status(philo, "is sleeping");
+	usleep(philo->sim->config.time_to_sleep * 1000);
+}
+
+void	*philo_routine(void *arg)
+{
+	t_philo	*philo;
+
+	philo = (t_philo *)arg;
+	while (!philo->sim->someone_died)
+	{
+		print_status(philo, "is thinking");
+		take_forks(philo);
+		eat(philo);
+		put_forks(philo);
+		sleep_philo(philo);
+	}
+	return (NULL);
+}
+
+void	*monitor_routine(void *arg)
+{
+	t_sim	*sim;
+	int		i;
+
+	sim = (t_sim *)arg;
+	while (!sim->someone_died)
+	{
+		i = 0;
+		while (i < sim->config.num_philos)
+		{
+			if (get_current_time(sim->start_time) - sim->philos[i].last_meal > sim->config.time_to_die)
+			{
+				sim->someone_died = 1;
+				print_status(&sim->philos[i], "died");
+				return (NULL);
+			}
+			i++;
+		}
+		usleep(1000); // check every 1ms
+	}
+	return (NULL);
+}
+
 int	init_sim(t_sim *sim, t_config config)
 {
 	int	i;
@@ -176,4 +260,3 @@ int	main(int argc, char **argv)
 	free(sim.forks);
 	return (0);
 }
-
