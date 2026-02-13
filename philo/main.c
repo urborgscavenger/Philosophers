@@ -6,12 +6,14 @@
 /*   By: mbauer <mbauer@student.42.fr>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/02/13 15:54:21 by mbauer            #+#    #+#             */
-/*   Updated: 2026/02/13 16:03:05 by mbauer           ###   ########.fr       */
+/*   Updated: 2026/02/13 16:07:00 by mbauer           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <pthread.h>
+#include <sys/time.h>
 
 typedef struct s_config
 {
@@ -21,6 +23,29 @@ typedef struct s_config
 	int	time_to_sleep;
 	int	num_meals; // optional, -1 if not provided
 }	t_config;
+
+typedef struct s_sim	t_sim; // forward declaration
+
+typedef struct s_philo
+{
+	int				id;
+	pthread_t		thread;
+	pthread_mutex_t	*left_fork;
+	pthread_mutex_t	*right_fork;
+	long long		last_meal;
+	int				meals_eaten;
+	t_sim			*sim;
+}	t_philo;
+
+typedef struct s_sim
+{
+	t_config		config;
+	t_philo			*philos;
+	pthread_mutex_t	*forks;
+	pthread_mutex_t	print_mutex;
+	struct timeval	start_time;
+	int				someone_died;
+}	t_sim;
 
 int	ft_atoi(const char *str)
 {
