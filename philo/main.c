@@ -6,7 +6,7 @@
 /*   By: mbauer <mbauer@student.42.fr>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/02/13 15:54:21 by mbauer            #+#    #+#             */
-/*   Updated: 2026/02/13 17:31:13 by mbauer           ###   ########.fr       */
+/*   Updated: 2026/02/13 17:33:16 by mbauer           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -252,10 +252,47 @@ int	main(int argc, char **argv)
 		printf("Error: Failed to initialize simulation.\n");
 		return (1);
 	}
-	// Hier kommt später der Rest des Programms
-	printf("Parsed and initialized successfully: philos=%d, die=%d, eat=%d, sleep=%d, meals=%d\n",
-		   config.num_philos, config.time_to_die, config.time_to_eat, config.time_to_sleep, config.num_meals);
+	// Start threads
+	int	i;
+	i = 0;
+	while (i < sim.config.num_philos)
+	{
+		if (pthread_create(&sim.philos[i].thread, NULL, philo_routine, &sim.philos[i]))
+		{
+			printf("Error: Failed to create philosopher thread.\n");
+			// Cleanup
+			while (--i >= 0)
+				pthread_join(sim.philos[i].thread, NULL);
+			free(sim.philos);
+			free(sim.forks);
+			return (1);
+		}
+		i++;
+	}
+	pthread_t	monitor_thread;
+	if (pthread_create(&monitor_thread, NULL, monitor_routine, &sim))
+	{
+		printf("Error: Failed to create monitor thread.\n");
+		i = 0;
+		while (i < sim.config.num_philos)
+			pthread_join(sim.philos[i++].thread, NULL);
+		free(sim.philos);
+		free(sim.forks);
+		return (1);
+	}
+	// Wait for threads
+	i = 0;
+	while (i < sim.config.num_philos)
+	{
+		pthread_join(sim.philos[i].thread, NULL);
+		i++;
+	}
+	pthread_join(monitor_thread, NULL);
 	// Cleanup
+	i = 0;
+	while (i < sim.config.num_philos)
+		pthread_mutex_destroy(&sim.forks[i++]);
+	pthread_mutex_destroy(&sim.print_mutex);
 	free(sim.philos);
 	free(sim.forks);
 	return (0);
