@@ -6,7 +6,7 @@
 /*   By: mbauer <mbauer@student.42.fr>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/02/14 20:26:43 by mbauer            #+#    #+#             */
-/*   Updated: 2026/02/14 20:27:39 by mbauer           ###   ########.fr       */
+/*   Updated: 2026/02/14 20:49:04 by mbauer           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -25,15 +25,8 @@ void	*solo_routine(void *arg)
 	return (NULL);
 }
 
-void	*philo_routine(void *arg)
+void	philo_main_loop(t_philo *philo)
 {
-	t_philo	*philo;
-
-	philo = (t_philo *)arg;
-	if (philo->sim->config.num_philos == 1)
-		return (solo_routine(arg));
-	if (philo->id % 2 == 0)
-		precise_sleep(philo->sim->config.time_to_eat / 2, philo->sim);
 	while (!is_stopped(philo->sim))
 	{
 		take_forks(philo);
@@ -52,5 +45,17 @@ void	*philo_routine(void *arg)
 			break ;
 		think(philo);
 	}
+}
+
+void	*philo_routine(void *arg)
+{
+	t_philo	*philo;
+
+	philo = (t_philo *)arg;
+	if (philo->sim->config.num_philos == 1)
+		return (solo_routine(arg));
+	if (philo->id % 2 == 0)
+		precise_sleep(philo->sim->config.time_to_eat / 2, philo->sim);
+	philo_main_loop(philo);
 	return (NULL);
 }

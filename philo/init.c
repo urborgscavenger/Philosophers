@@ -6,7 +6,7 @@
 /*   By: mbauer <mbauer@student.42.fr>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/02/14 20:30:13 by mbauer            #+#    #+#             */
-/*   Updated: 2026/02/14 20:31:01 by mbauer           ###   ########.fr       */
+/*   Updated: 2026/02/14 20:42:30 by mbauer           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -34,6 +34,29 @@ int	init_forks(t_sim *sim)
 	return (0);
 }
 
+int	init_philo(t_sim *sim, int i)
+{
+	sim->philos[i].id = i + 1;
+	sim->philos[i].sim = sim;
+	sim->philos[i].meals_eaten = 0;
+	sim->philos[i].last_meal = sim->start_time;
+	if (i % 2 == 0)
+	{
+		sim->philos[i].left_fork = &sim->forks[i];
+		sim->philos[i].right_fork = &sim->forks[(i + 1)
+			% sim->config.num_philos];
+	}
+	else
+	{
+		sim->philos[i].left_fork = &sim->forks[(i + 1)
+			% sim->config.num_philos];
+		sim->philos[i].right_fork = &sim->forks[i];
+	}
+	if (pthread_mutex_init(&sim->philos[i].meal_mutex, NULL))
+		return (1);
+	return (0);
+}
+
 int	init_philos(t_sim *sim)
 {
 	int	i;
@@ -44,23 +67,7 @@ int	init_philos(t_sim *sim)
 	i = 0;
 	while (i < sim->config.num_philos)
 	{
-		sim->philos[i].id = i + 1;
-		sim->philos[i].sim = sim;
-		sim->philos[i].meals_eaten = 0;
-		sim->philos[i].last_meal = sim->start_time;
-		if (i % 2 == 0)
-		{
-			sim->philos[i].left_fork = &sim->forks[i];
-			sim->philos[i].right_fork = &sim->forks[(i + 1)
-				% sim->config.num_philos];
-		}
-		else
-		{
-			sim->philos[i].left_fork = &sim->forks[(i + 1)
-				% sim->config.num_philos];
-			sim->philos[i].right_fork = &sim->forks[i];
-		}
-		if (pthread_mutex_init(&sim->philos[i].meal_mutex, NULL))
+		if (init_philo(sim, i))
 		{
 			while (--i >= 0)
 				pthread_mutex_destroy(&sim->philos[i].meal_mutex);
