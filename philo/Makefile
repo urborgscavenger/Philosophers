@@ -4,7 +4,7 @@ CC = gcc
 CFLAGS = -Wall -Wextra -Werror -pthread
 RM = rm -f
 
-SRC = main.c
+SRC = main.c utils.c print.c actions.c routines.c monitor.c init.c start.c
 OBJ = $(SRC:.c=.o)
 
 all: $(NAME)
