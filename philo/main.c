@@ -6,7 +6,7 @@
 /*   By: mbauer <mbauer@student.42.fr>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/02/13 15:54:21 by mbauer            #+#    #+#             */
-/*   Updated: 2026/02/13 23:31:21 by mbauer           ###   ########.fr       */
+/*   Updated: 2026/02/14 01:01:29 by mbauer           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -121,7 +121,7 @@ void	print_status(t_philo *philo, char *status)
 	pthread_mutex_unlock(&philo->sim->print_mutex);
 }
 
-int	take_forks(t_philo *philo)
+int	take_forks_even(t_philo *philo)
 {
 	t_sim *sim = philo->sim;
 
@@ -241,6 +241,126 @@ int	take_forks(t_philo *philo)
 	}
 }
 
+int	take_forks_odd(t_philo *philo)
+{
+	t_sim *sim = philo->sim;
+
+	if (!philo->right_fork)
+		return (0); // Can't take both forks
+	if (philo->id == sim->config.num_philos)
+	{
+		// Last philo: take right first
+		while (1)
+		{
+			pthread_mutex_lock(&sim->died_mutex);
+			if (sim->someone_died)
+			{
+				pthread_mutex_unlock(&sim->died_mutex);
+				return (0);
+			}
+			pthread_mutex_unlock(&sim->died_mutex);
+			if (pthread_mutex_trylock(philo->right_fork) == 0)
+			{
+				pthread_mutex_lock(&sim->died_mutex);
+				if (sim->someone_died)
+				{
+					pthread_mutex_unlock(&sim->died_mutex);
+					pthread_mutex_unlock(philo->right_fork);
+					return (0);
+				}
+				pthread_mutex_unlock(&sim->died_mutex);
+				print_status(philo, "has taken a fork");
+				while (1)
+				{
+					pthread_mutex_lock(&sim->died_mutex);
+					if (sim->someone_died)
+					{
+						pthread_mutex_unlock(&sim->died_mutex);
+						pthread_mutex_unlock(philo->right_fork);
+						return (0);
+					}
+					pthread_mutex_unlock(&sim->died_mutex);
+					if (pthread_mutex_trylock(philo->left_fork) == 0)
+					{
+						pthread_mutex_lock(&sim->died_mutex);
+						if (sim->someone_died)
+						{
+							pthread_mutex_unlock(&sim->died_mutex);
+							pthread_mutex_unlock(philo->right_fork);
+							pthread_mutex_unlock(philo->left_fork);
+							return (0);
+						}
+						pthread_mutex_unlock(&sim->died_mutex);
+						print_status(philo, "has taken a fork");
+						return (1);
+					}
+					usleep(1000);
+				}
+				pthread_mutex_unlock(philo->right_fork);
+				return (0);
+			}
+			usleep(1000);
+		}
+		return (0);
+	}
+	else
+	{
+		// Others: take right first for odd
+		while (1)
+		{
+			pthread_mutex_lock(&sim->died_mutex);
+			if (sim->someone_died)
+			{
+				pthread_mutex_unlock(&sim->died_mutex);
+				return (0);
+			}
+			pthread_mutex_unlock(&sim->died_mutex);
+			if (pthread_mutex_trylock(philo->right_fork) == 0)
+			{
+				pthread_mutex_lock(&sim->died_mutex);
+				if (sim->someone_died)
+				{
+					pthread_mutex_unlock(&sim->died_mutex);
+					pthread_mutex_unlock(philo->right_fork);
+					return (0);
+				}
+				pthread_mutex_unlock(&sim->died_mutex);
+				print_status(philo, "has taken a fork");
+				while (1)
+				{
+					pthread_mutex_lock(&sim->died_mutex);
+					if (sim->someone_died)
+					{
+						pthread_mutex_unlock(&sim->died_mutex);
+						pthread_mutex_unlock(philo->right_fork);
+						return (0);
+					}
+					pthread_mutex_unlock(&sim->died_mutex);
+					if (pthread_mutex_trylock(philo->left_fork) == 0)
+					{
+						pthread_mutex_lock(&sim->died_mutex);
+						if (sim->someone_died)
+						{
+							pthread_mutex_unlock(&sim->died_mutex);
+							pthread_mutex_unlock(philo->right_fork);
+							pthread_mutex_unlock(philo->left_fork);
+							return (0);
+						}
+						pthread_mutex_unlock(&sim->died_mutex);
+						print_status(philo, "has taken a fork");
+						return (1);
+					}
+					usleep(1000);
+				}
+				pthread_mutex_unlock(philo->right_fork);
+				return (0);
+			}
+			usleep(1000);
+		}
+		return (0);
+	}
+}
+
 void	eat(t_philo *philo)
 {
 	print_status(philo, "is eating");
@@ -259,6 +379,13 @@ void	put_forks(t_philo *philo)
 
 void	sleep_philo(t_philo *philo)
 {
+	pthread_mutex_lock(&philo->sim->died_mutex);
+	if (philo->sim->someone_died)
+	{
+		pthread_mutex_unlock(&philo->sim->died_mutex);
+		return ;
+	}
+	pthread_mutex_unlock(&philo->sim->died_mutex);
 	print_status(philo, "is sleeping");
 	usleep(philo->sim->config.time_to_sleep * 1000);
 }
@@ -278,11 +405,20 @@ void	*philo_routine(void *arg)
 		}
 		pthread_mutex_unlock(&philo->sim->died_mutex);
 		print_status(philo, "is thinking");
-		if (take_forks(philo))
+		if (philo->sim->config.num_philos % 2 == 0)
 		{
-			eat(philo);
-			put_forks(philo);
+			usleep(philo->id * 1000);
+			if (!take_forks_even(philo))
+				return (NULL);
 		}
+		else
+		{
+			usleep(philo->id * 100);
+			if (!take_forks_even(philo))
+				return (NULL);
+		}
+		eat(philo);
+		put_forks(philo);
 		sleep_philo(philo);
 	}
 	return (NULL);
@@ -328,7 +464,7 @@ void	*monitor_routine(void *arg)
 		while (i < sim->config.num_philos)
 		{
 			pthread_mutex_lock(&sim->philos[i].data_mutex);
-			if (get_current_time(sim->start_time) - sim->philos[i].last_meal > (sim->config.num_philos >= 100 ? 10000 : sim->config.time_to_die))
+			if (get_current_time(sim->start_time) - sim->philos[i].last_meal > sim->config.time_to_die)
 			{
 				pthread_mutex_unlock(&sim->philos[i].data_mutex);
 				pthread_mutex_lock(&sim->died_mutex);
