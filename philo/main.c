@@ -6,7 +6,7 @@
 /*   By: mbauer <mbauer@student.42.fr>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/02/13 15:54:21 by mbauer            #+#    #+#             */
-/*   Updated: 2026/02/14 01:26:03 by mbauer           ###   ########.fr       */
+/*   Updated: 2026/02/14 02:08:23 by mbauer           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -19,9 +19,9 @@
 typedef struct s_config
 {
 	int	num_philos;
-	int	time_to_die;
-	int	time_to_eat;
-	int	time_to_sleep;
+	long double	time_to_die;
+	long double	time_to_eat;
+	long double	time_to_sleep;
 	int	num_meals; // optional, -1 if not provided
 }	t_config;
 
@@ -74,6 +74,17 @@ int	ft_atoi(const char *str)
 	return (result);
 }
 
+long double	ft_atold(const char *str)
+{
+	char	*endptr;
+	long double	result;
+
+	result = strtold(str, &endptr);
+	if (*endptr != '\0' || result < 0)
+		return (-1.0L);
+	return (result);
+}
+
 int	parse_args(int argc, char **argv, t_config *config)
 {
 	if (argc < 5 || argc > 6)
@@ -82,25 +93,25 @@ int	parse_args(int argc, char **argv, t_config *config)
 		return (1);
 	}
 	config->num_philos = ft_atoi(argv[1]);
-	config->time_to_die = ft_atoi(argv[2]);
-	config->time_to_eat = ft_atoi(argv[3]);
-	config->time_to_sleep = ft_atoi(argv[4]);
+	config->time_to_die = ft_atold(argv[2]);
+	config->time_to_eat = ft_atold(argv[3]);
+	config->time_to_sleep = ft_atold(argv[4]);
 	if (argc == 6)
 		config->num_meals = ft_atoi(argv[5]);
 	else
 		config->num_meals = -1;
-	if (config->num_philos == -1 || config->time_to_die == -1 ||
-		config->time_to_eat == -1 || config->time_to_sleep == -1 ||
+	if (config->num_philos == -1 || config->time_to_die == -1.0L ||
+		config->time_to_eat == -1.0L || config->time_to_sleep == -1.0L ||
 		(config->num_meals == -1 && argc == 6))
 	{
-		printf("Error: Invalid arguments. Must be positive integers.\n");
+		printf("Error: Invalid arguments. Must be positive numbers.\n");
 		return (1);
 	}
-	if (config->num_philos <= 0 || config->time_to_die <= 0 ||
-		config->time_to_eat <= 0 || config->time_to_sleep <= 0 ||
+	if (config->num_philos <= 0 || config->time_to_die <= 0.0L ||
+		config->time_to_eat <= 0.0L || config->time_to_sleep <= 0.0L ||
 		(config->num_meals != -1 && config->num_meals <= 0))
 	{
-		printf("Error: All arguments must be positive integers.\n");
+		printf("Error: All arguments must be positive numbers.\n");
 		return (1);
 	}
 	return (0);
@@ -307,7 +318,7 @@ void	eat(t_philo *philo)
 	print_status(philo, "is eating");
 	pthread_mutex_lock(&philo->data_mutex);
 	philo->last_meal = get_current_time(philo->sim->start_time);
-	usleep(philo->sim->config.time_to_eat * 1000);
+	usleep((useconds_t)((long double)philo->sim->config.time_to_eat * 1000.0L));
 	philo->meals_eaten++;
 	pthread_mutex_unlock(&philo->data_mutex);
 }
@@ -328,7 +339,7 @@ void	sleep_philo(t_philo *philo)
 	}
 	pthread_mutex_unlock(&philo->sim->died_mutex);
 	print_status(philo, "is sleeping");
-	usleep(philo->sim->config.time_to_sleep * 1000);
+	usleep((useconds_t)((long double)philo->sim->config.time_to_sleep * 1000.0L));
 }
 
 void	*philo_routine(void *arg)
@@ -405,7 +416,7 @@ void	*monitor_routine(void *arg)
 		while (i < sim->config.num_philos)
 		{
 			pthread_mutex_lock(&sim->philos[i].data_mutex);
-			if (get_current_time(sim->start_time) - sim->philos[i].last_meal > sim->config.time_to_die)
+			if (get_current_time(sim->start_time) - sim->philos[i].last_meal > (long long)sim->config.time_to_die)
 			{
 				pthread_mutex_unlock(&sim->philos[i].data_mutex);
 				pthread_mutex_lock(&sim->died_mutex);
