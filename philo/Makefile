@@ -7,13 +7,16 @@ RM = rm -f
 SRC = main.c utils.c print.c actions.c routines.c monitor.c init.c start.c
 OBJ = $(SRC:.c=.o)
 
-all: $(NAME)
+all: $(NAME) clean-coverage
 
 $(NAME): $(OBJ)
 	$(CC) $(CFLAGS) $(OBJ) -o $(NAME)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
+
+clean-coverage:
+	$(RM) $(SRC:.c=.gcno)
 
 clean:
 	$(RM) $(OBJ)
@@ -23,4 +26,4 @@ fclean: clean
 
 re: fclean all
 
-.PHONY: all clean fclean re
+.PHONY: all clean fclean re clean-coverage
