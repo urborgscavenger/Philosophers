@@ -6,7 +6,7 @@
 /*   By: mbauer <mbauer@student.42.fr>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/02/13 15:54:21 by mbauer            #+#    #+#             */
-/*   Updated: 2026/02/14 02:08:23 by mbauer           ###   ########.fr       */
+/*   Updated: 2026/02/14 03:58:44 by mbauer           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -18,14 +18,14 @@
 
 typedef struct s_config
 {
-	int	num_philos;
-	long double	time_to_die;
-	long double	time_to_eat;
-	long double	time_to_sleep;
-	int	num_meals; // optional, -1 if not provided
+	int			num_philos;
+	long long	time_to_die;
+	long long	time_to_eat;
+	long long	time_to_sleep;
+	int			num_meals;
 }	t_config;
 
-typedef struct s_sim	t_sim; // forward declaration
+typedef struct s_sim	t_sim;
 
 typedef struct s_philo
 {
@@ -35,7 +35,7 @@ typedef struct s_philo
 	pthread_mutex_t	*right_fork;
 	long long		last_meal;
 	int				meals_eaten;
-	pthread_mutex_t	data_mutex;
+	pthread_mutex_t	meal_mutex;
 	t_sim			*sim;
 }	t_philo;
 
@@ -45,20 +45,80 @@ typedef struct s_sim
 	t_philo			*philos;
 	pthread_mutex_t	*forks;
 	pthread_mutex_t	print_mutex;
-	pthread_mutex_t	died_mutex;
-	struct timeval	start_time;
-	int				someone_died;
+	pthread_mutex_t	stop_mutex;
+	long long		start_time;
+	int				stop;
 }	t_sim;
 
-int	ft_atoi(const char *str)
+long long	get_time_ms(void)
 {
-	int	result;
-	int	i;
+	struct timeval	tv;
+
+	gettimeofday(&tv, NULL);
+	return ((long long)tv.tv_sec * 1000 + tv.tv_usec / 1000);
+}
+
+int	is_stopped(t_sim *sim)
+{
+	int	ret;
+
+	pthread_mutex_lock(&sim->stop_mutex);
+	ret = sim->stop;
+	pthread_mutex_unlock(&sim->stop_mutex);
+	return (ret);
+}
+
+void	set_stop(t_sim *sim)
+{
+	pthread_mutex_lock(&sim->stop_mutex);
+	sim->stop = 1;
+	pthread_mutex_unlock(&sim->stop_mutex);
+}
+
+void	precise_sleep(long long duration_ms, t_sim *sim)
+{
+	long long	start;
+	long long	remaining;
+
+	start = get_time_ms();
+	while (!is_stopped(sim))
+	{
+		remaining = duration_ms - (get_time_ms() - start);
+		if (remaining <= 0)
+			break ;
+		if (remaining > 2)
+			usleep(500);
+		else
+			usleep(100);
+	}
+}
+
+void	print_status(t_philo *philo, char *status)
+{
+	pthread_mutex_lock(&philo->sim->print_mutex);
+	if (!is_stopped(philo->sim))
+		printf("%lld %d %s\n",
+			get_time_ms() - philo->sim->start_time, philo->id, status);
+	pthread_mutex_unlock(&philo->sim->print_mutex);
+}
+
+void	print_death(t_philo *philo)
+{
+	pthread_mutex_lock(&philo->sim->print_mutex);
+	printf("%lld %d died\n",
+		get_time_ms() - philo->sim->start_time, philo->id);
+	pthread_mutex_unlock(&philo->sim->print_mutex);
+}
+
+int	ft_atoi_positive(const char *str)
+{
+	int		i;
+	long	result;
 
 	result = 0;
 	i = 0;
-	while (str[i] == ' ' || str[i] == '\t' || str[i] == '\n' ||
-		   str[i] == '\v' || str[i] == '\f' || str[i] == '\r')
+	while (str[i] == ' ' || str[i] == '\t' || str[i] == '\n'
+		|| str[i] == '\v' || str[i] == '\f' || str[i] == '\r')
 		i++;
 	if (str[i] == '+')
 		i++;
@@ -67,279 +127,86 @@ int	ft_atoi(const char *str)
 	while (str[i] >= '0' && str[i] <= '9')
 	{
 		result = result * 10 + (str[i] - '0');
+		if (result > 2147483647)
+			return (-1);
 		i++;
 	}
 	if (str[i] != '\0')
 		return (-1);
-	return (result);
-}
-
-long double	ft_atold(const char *str)
-{
-	char	*endptr;
-	long double	result;
-
-	result = strtold(str, &endptr);
-	if (*endptr != '\0' || result < 0)
-		return (-1.0L);
-	return (result);
+	return ((int)result);
 }
 
 int	parse_args(int argc, char **argv, t_config *config)
 {
 	if (argc < 5 || argc > 6)
 	{
-		printf("Usage: %s number_of_philosophers time_to_die time_to_eat time_to_sleep [number_of_times_each_philosopher_must_eat]\n", argv[0]);
+		printf("Usage: %s num_philos time_to_die time_to_eat"
+			" time_to_sleep [num_meals]\n", argv[0]);
 		return (1);
 	}
-	config->num_philos = ft_atoi(argv[1]);
-	config->time_to_die = ft_atold(argv[2]);
-	config->time_to_eat = ft_atold(argv[3]);
-	config->time_to_sleep = ft_atold(argv[4]);
+	config->num_philos = ft_atoi_positive(argv[1]);
+	config->time_to_die = ft_atoi_positive(argv[2]);
+	config->time_to_eat = ft_atoi_positive(argv[3]);
+	config->time_to_sleep = ft_atoi_positive(argv[4]);
+	config->num_meals = -1;
 	if (argc == 6)
-		config->num_meals = ft_atoi(argv[5]);
-	else
-		config->num_meals = -1;
-	if (config->num_philos == -1 || config->time_to_die == -1.0L ||
-		config->time_to_eat == -1.0L || config->time_to_sleep == -1.0L ||
-		(config->num_meals == -1 && argc == 6))
+		config->num_meals = ft_atoi_positive(argv[5]);
+	if (config->num_philos <= 0 || config->time_to_die <= 0
+		|| config->time_to_eat <= 0 || config->time_to_sleep <= 0
+		|| (argc == 6 && config->num_meals <= 0))
 	{
-		printf("Error: Invalid arguments. Must be positive numbers.\n");
-		return (1);
-	}
-	if (config->num_philos <= 0 || config->time_to_die <= 0.0L ||
-		config->time_to_eat <= 0.0L || config->time_to_sleep <= 0.0L ||
-		(config->num_meals != -1 && config->num_meals <= 0))
-	{
-		printf("Error: All arguments must be positive numbers.\n");
+		printf("Error: Invalid arguments.\n");
 		return (1);
 	}
 	return (0);
 }
 
-long long	get_current_time(struct timeval start)
+void	take_forks(t_philo *philo)
 {
-	struct timeval	now;
-
-	gettimeofday(&now, NULL);
-	return ((now.tv_sec - start.tv_sec) * 1000 + (now.tv_usec - start.tv_usec) / 1000);
-}
-
-void	print_status(t_philo *philo, char *status)
-{
-	pthread_mutex_lock(&philo->sim->print_mutex);
-	printf("%lld %d %s\n", get_current_time(philo->sim->start_time), philo->id, status);
-	pthread_mutex_unlock(&philo->sim->print_mutex);
-}
-
-int	take_forks_even(t_philo *philo)
-{
-	t_sim *sim = philo->sim;
-
-	if (!philo->right_fork)
-		return (0); // Can't take both forks
-	// Always take left first
-	while (1)
-	{
-		pthread_mutex_lock(&sim->died_mutex);
-		if (sim->someone_died)
-		{
-			pthread_mutex_unlock(&sim->died_mutex);
-			return (0);
-		}
-		pthread_mutex_unlock(&sim->died_mutex);
-		if (pthread_mutex_trylock(philo->left_fork) == 0)
-		{
-			pthread_mutex_lock(&sim->died_mutex);
-			if (sim->someone_died)
-			{
-				pthread_mutex_unlock(&sim->died_mutex);
-				pthread_mutex_unlock(philo->left_fork);
-				return (0);
-			}
-			pthread_mutex_unlock(&sim->died_mutex);
-			print_status(philo, "has taken a fork");
-			while (1)
-			{
-				pthread_mutex_lock(&sim->died_mutex);
-				if (sim->someone_died)
-				{
-					pthread_mutex_unlock(&sim->died_mutex);
-					pthread_mutex_unlock(philo->left_fork);
-					return (0);
-				}
-				pthread_mutex_unlock(&sim->died_mutex);
-				if (pthread_mutex_trylock(philo->right_fork) == 0)
-				{
-					pthread_mutex_lock(&sim->died_mutex);
-					if (sim->someone_died)
-					{
-						pthread_mutex_unlock(&sim->died_mutex);
-						pthread_mutex_unlock(philo->left_fork);
-						pthread_mutex_unlock(philo->right_fork);
-						return (0);
-					}
-					pthread_mutex_unlock(&sim->died_mutex);
-					print_status(philo, "has taken a fork");
-					return (1);
-				}
-				usleep(1000);
-			}
-			pthread_mutex_unlock(philo->left_fork);
-			return (0);
-		}
-		usleep(1000);
-	}
-	return (0);
-}
-
-int	take_forks_odd(t_philo *philo)
-{
-	t_sim *sim = philo->sim;
-
-	if (!philo->right_fork)
-		return (0); // Can't take both forks
-	if (philo->id == sim->config.num_philos)
-	{
-		// Last philo: take right first
-		while (1)
-		{
-			pthread_mutex_lock(&sim->died_mutex);
-			if (sim->someone_died)
-			{
-				pthread_mutex_unlock(&sim->died_mutex);
-				return (0);
-			}
-			pthread_mutex_unlock(&sim->died_mutex);
-			if (pthread_mutex_trylock(philo->right_fork) == 0)
-			{
-				pthread_mutex_lock(&sim->died_mutex);
-				if (sim->someone_died)
-				{
-					pthread_mutex_unlock(&sim->died_mutex);
-					pthread_mutex_unlock(philo->right_fork);
-					return (0);
-				}
-				pthread_mutex_unlock(&sim->died_mutex);
-				print_status(philo, "has taken a fork");
-				while (1)
-				{
-					pthread_mutex_lock(&sim->died_mutex);
-					if (sim->someone_died)
-					{
-						pthread_mutex_unlock(&sim->died_mutex);
-						pthread_mutex_unlock(philo->right_fork);
-						return (0);
-					}
-					pthread_mutex_unlock(&sim->died_mutex);
-					if (pthread_mutex_trylock(philo->left_fork) == 0)
-					{
-						pthread_mutex_lock(&sim->died_mutex);
-						if (sim->someone_died)
-						{
-							pthread_mutex_unlock(&sim->died_mutex);
-							pthread_mutex_unlock(philo->right_fork);
-							pthread_mutex_unlock(philo->left_fork);
-							return (0);
-						}
-						pthread_mutex_unlock(&sim->died_mutex);
-						print_status(philo, "has taken a fork");
-						return (1);
-					}
-					usleep(1000);
-				}
-				pthread_mutex_unlock(philo->right_fork);
-				return (0);
-			}
-			usleep(1000);
-		}
-		return (0);
-	}
-	else
-	{
-		// Others: take right first for odd
-		while (1)
-		{
-			pthread_mutex_lock(&sim->died_mutex);
-			if (sim->someone_died)
-			{
-				pthread_mutex_unlock(&sim->died_mutex);
-				return (0);
-			}
-			pthread_mutex_unlock(&sim->died_mutex);
-			if (pthread_mutex_trylock(philo->right_fork) == 0)
-			{
-				pthread_mutex_lock(&sim->died_mutex);
-				if (sim->someone_died)
-				{
-					pthread_mutex_unlock(&sim->died_mutex);
-					pthread_mutex_unlock(philo->right_fork);
-					return (0);
-				}
-				pthread_mutex_unlock(&sim->died_mutex);
-				print_status(philo, "has taken a fork");
-				while (1)
-				{
-					pthread_mutex_lock(&sim->died_mutex);
-					if (sim->someone_died)
-					{
-						pthread_mutex_unlock(&sim->died_mutex);
-						pthread_mutex_unlock(philo->right_fork);
-						return (0);
-					}
-					pthread_mutex_unlock(&sim->died_mutex);
-					if (pthread_mutex_trylock(philo->left_fork) == 0)
-					{
-						pthread_mutex_lock(&sim->died_mutex);
-						if (sim->someone_died)
-						{
-							pthread_mutex_unlock(&sim->died_mutex);
-							pthread_mutex_unlock(philo->right_fork);
-							pthread_mutex_unlock(philo->left_fork);
-							return (0);
-						}
-						pthread_mutex_unlock(&sim->died_mutex);
-						print_status(philo, "has taken a fork");
-						return (1);
-					}
-					usleep(1000);
-				}
-				pthread_mutex_unlock(philo->right_fork);
-				return (0);
-			}
-			usleep(1000);
-		}
-		return (0);
-	}
+	pthread_mutex_lock(philo->left_fork);
+	print_status(philo, "has taken a fork");
+	pthread_mutex_lock(philo->right_fork);
+	print_status(philo, "has taken a fork");
 }
 
 void	eat(t_philo *philo)
 {
 	print_status(philo, "is eating");
-	pthread_mutex_lock(&philo->data_mutex);
-	philo->last_meal = get_current_time(philo->sim->start_time);
-	usleep((useconds_t)((long double)philo->sim->config.time_to_eat * 1000.0L));
+	pthread_mutex_lock(&philo->meal_mutex);
+	philo->last_meal = get_time_ms();
 	philo->meals_eaten++;
-	pthread_mutex_unlock(&philo->data_mutex);
-}
-
-void	put_forks(t_philo *philo)
-{
-	pthread_mutex_unlock(philo->left_fork);
+	pthread_mutex_unlock(&philo->meal_mutex);
+	precise_sleep(philo->sim->config.time_to_eat, philo->sim);
 	pthread_mutex_unlock(philo->right_fork);
+	pthread_mutex_unlock(philo->left_fork);
 }
 
-void	sleep_philo(t_philo *philo)
+void	think(t_philo *philo)
 {
-	pthread_mutex_lock(&philo->sim->died_mutex);
-	if (philo->sim->someone_died)
+	long long	think_time;
+
+	print_status(philo, "is thinking");
+	if (philo->sim->config.num_philos % 2 != 0)
 	{
-		pthread_mutex_unlock(&philo->sim->died_mutex);
-		return ;
+		think_time = (philo->sim->config.time_to_eat * 2
+				- philo->sim->config.time_to_sleep);
+		if (think_time < 0)
+			think_time = 0;
+		precise_sleep(think_time, philo->sim);
 	}
-	pthread_mutex_unlock(&philo->sim->died_mutex);
-	print_status(philo, "is sleeping");
-	usleep((useconds_t)((long double)philo->sim->config.time_to_sleep * 1000.0L));
+}
+
+void	*solo_routine(void *arg)
+{
+	t_philo	*philo;
+
+	philo = (t_philo *)arg;
+	print_status(philo, "is thinking");
+	pthread_mutex_lock(philo->left_fork);
+	print_status(philo, "has taken a fork");
+	precise_sleep(philo->sim->config.time_to_die, philo->sim);
+	pthread_mutex_unlock(philo->left_fork);
+	return (NULL);
 }
 
 void	*philo_routine(void *arg)
@@ -347,166 +214,227 @@ void	*philo_routine(void *arg)
 	t_philo	*philo;
 
 	philo = (t_philo *)arg;
-	while (1)
+	if (philo->sim->config.num_philos == 1)
+		return (solo_routine(arg));
+	if (philo->id % 2 == 0)
+		precise_sleep(philo->sim->config.time_to_eat / 2, philo->sim);
+	while (!is_stopped(philo->sim))
 	{
-		pthread_mutex_lock(&philo->sim->died_mutex);
-		if (philo->sim->someone_died)
+		take_forks(philo);
+		if (is_stopped(philo->sim))
 		{
-			pthread_mutex_unlock(&philo->sim->died_mutex);
-			return (NULL);
-		}
-		pthread_mutex_unlock(&philo->sim->died_mutex);
-		print_status(philo, "is thinking");
-		if (philo->sim->config.num_philos % 2 == 0)
-		{
-			usleep(philo->id * 100);
-			if (!take_forks_even(philo))
-				return (NULL);
-		}
-		else
-		{
-			usleep(philo->id * 100);
-			if (!take_forks_even(philo))
-				return (NULL);
+			pthread_mutex_unlock(philo->right_fork);
+			pthread_mutex_unlock(philo->left_fork);
+			break ;
 		}
 		eat(philo);
-		put_forks(philo);
-		sleep_philo(philo);
+		if (is_stopped(philo->sim))
+			break ;
+		print_status(philo, "is sleeping");
+		precise_sleep(philo->sim->config.time_to_sleep, philo->sim);
+		if (is_stopped(philo->sim))
+			break ;
+		think(philo);
 	}
 	return (NULL);
+}
+
+int	check_death(t_sim *sim)
+{
+	int			i;
+	long long	elapsed;
+
+	i = 0;
+	while (i < sim->config.num_philos)
+	{
+		pthread_mutex_lock(&sim->philos[i].meal_mutex);
+		elapsed = get_time_ms() - sim->philos[i].last_meal;
+		pthread_mutex_unlock(&sim->philos[i].meal_mutex);
+		if (elapsed > sim->config.time_to_die)
+		{
+			set_stop(sim);
+			print_death(&sim->philos[i]);
+			return (1);
+		}
+		i++;
+	}
+	return (0);
+}
+
+int	check_all_ate(t_sim *sim)
+{
+	int	i;
+
+	if (sim->config.num_meals == -1)
+		return (0);
+	i = 0;
+	while (i < sim->config.num_philos)
+	{
+		pthread_mutex_lock(&sim->philos[i].meal_mutex);
+		if (sim->philos[i].meals_eaten < sim->config.num_meals)
+		{
+			pthread_mutex_unlock(&sim->philos[i].meal_mutex);
+			return (0);
+		}
+		pthread_mutex_unlock(&sim->philos[i].meal_mutex);
+		i++;
+	}
+	return (1);
 }
 
 void	*monitor_routine(void *arg)
 {
 	t_sim	*sim;
-	int		i;
-	int		all_eaten;
 
 	sim = (t_sim *)arg;
-	while (1)
+	while (!is_stopped(sim))
 	{
-		pthread_mutex_lock(&sim->died_mutex);
-		if (sim->someone_died)
+		if (check_death(sim))
+			return (NULL);
+		if (check_all_ate(sim))
 		{
-			pthread_mutex_unlock(&sim->died_mutex);
+			set_stop(sim);
 			return (NULL);
 		}
-		pthread_mutex_unlock(&sim->died_mutex);
-		if (sim->config.num_meals != -1)
-		{
-			all_eaten = 1;
-			i = 0;
-			while (i < sim->config.num_philos)
-			{
-				pthread_mutex_lock(&sim->philos[i].data_mutex);
-				if (sim->philos[i].meals_eaten < sim->config.num_meals)
-					all_eaten = 0;
-				pthread_mutex_unlock(&sim->philos[i].data_mutex);
-				i++;
-			}
-			if (all_eaten)
-			{
-				pthread_mutex_lock(&sim->died_mutex);
-				sim->someone_died = 1;
-				pthread_mutex_unlock(&sim->died_mutex);
-				return (NULL);
-			}
-		}
-		i = 0;
-		while (i < sim->config.num_philos)
-		{
-			pthread_mutex_lock(&sim->philos[i].data_mutex);
-			if (get_current_time(sim->start_time) - sim->philos[i].last_meal > (long long)sim->config.time_to_die)
-			{
-				pthread_mutex_unlock(&sim->philos[i].data_mutex);
-				pthread_mutex_lock(&sim->died_mutex);
-				sim->someone_died = 1;
-				pthread_mutex_unlock(&sim->died_mutex);
-				print_status(&sim->philos[i], "died");
-				return (NULL);
-			}
-			pthread_mutex_unlock(&sim->philos[i].data_mutex);
-			i++;
-		}
-		usleep(1000); // check every 1ms
+		usleep(500);
 	}
 	return (NULL);
 }
 
-int	init_sim(t_sim *sim, t_config config)
+int	init_forks(t_sim *sim)
 {
 	int	i;
 
-	sim->config = config;
-	sim->philos = malloc(sizeof(t_philo) * config.num_philos);
-	if (!sim->philos)
-		return (1);
-	sim->forks = malloc(sizeof(pthread_mutex_t) * config.num_philos);
+	sim->forks = malloc(sizeof(pthread_mutex_t) * sim->config.num_philos);
 	if (!sim->forks)
-	{
-		free(sim->philos);
 		return (1);
-	}
 	i = 0;
-	while (i < config.num_philos)
+	while (i < sim->config.num_philos)
 	{
 		if (pthread_mutex_init(&sim->forks[i], NULL))
 		{
-			// Cleanup previous mutexes
 			while (--i >= 0)
 				pthread_mutex_destroy(&sim->forks[i]);
 			free(sim->forks);
-			free(sim->philos);
 			return (1);
 		}
 		i++;
 	}
-	if (pthread_mutex_init(&sim->print_mutex, NULL))
-	{
-		i = 0;
-		while (i < config.num_philos)
-			pthread_mutex_destroy(&sim->forks[i++]);
-		free(sim->forks);
-		free(sim->philos);
+	return (0);
+}
+
+int	init_philos(t_sim *sim)
+{
+	int	i;
+
+	sim->philos = malloc(sizeof(t_philo) * sim->config.num_philos);
+	if (!sim->philos)
 		return (1);
-	}
-	if (pthread_mutex_init(&sim->died_mutex, NULL))
-	{
-		i = 0;
-		while (i < config.num_philos)
-			pthread_mutex_destroy(&sim->forks[i++]);
-		pthread_mutex_destroy(&sim->print_mutex);
-		free(sim->forks);
-		free(sim->philos);
-		return (1);
-	}
-	gettimeofday(&sim->start_time, NULL);
-	sim->someone_died = 0;
 	i = 0;
-	while (i < config.num_philos)
+	while (i < sim->config.num_philos)
 	{
 		sim->philos[i].id = i + 1;
 		sim->philos[i].sim = sim;
-		sim->philos[i].left_fork = &sim->forks[i];
-		sim->philos[i].right_fork = &sim->forks[(i + 1) % config.num_philos];
-		sim->philos[i].last_meal = get_current_time(sim->start_time); // Start from now
 		sim->philos[i].meals_eaten = 0;
-		if (pthread_mutex_init(&sim->philos[i].data_mutex, NULL))
+		sim->philos[i].last_meal = sim->start_time;
+		if (i % 2 == 0)
 		{
-			// Cleanup
+			sim->philos[i].left_fork = &sim->forks[i];
+			sim->philos[i].right_fork
+				= &sim->forks[(i + 1) % sim->config.num_philos];
+		}
+		else
+		{
+			sim->philos[i].left_fork
+				= &sim->forks[(i + 1) % sim->config.num_philos];
+			sim->philos[i].right_fork = &sim->forks[i];
+		}
+		if (pthread_mutex_init(&sim->philos[i].meal_mutex, NULL))
+		{
 			while (--i >= 0)
-				pthread_mutex_destroy(&sim->philos[i].data_mutex);
-			i = 0;
-			while (i < config.num_philos)
-				pthread_mutex_destroy(&sim->forks[i++]);
-			pthread_mutex_destroy(&sim->print_mutex);
-			pthread_mutex_destroy(&sim->died_mutex);
-			free(sim->forks);
+				pthread_mutex_destroy(&sim->philos[i].meal_mutex);
 			free(sim->philos);
 			return (1);
 		}
 		i++;
 	}
+	return (0);
+}
+
+int	init_sim(t_sim *sim, t_config config)
+{
+	sim->config = config;
+	sim->stop = 0;
+	sim->start_time = get_time_ms();
+	if (pthread_mutex_init(&sim->print_mutex, NULL))
+		return (1);
+	if (pthread_mutex_init(&sim->stop_mutex, NULL))
+	{
+		pthread_mutex_destroy(&sim->print_mutex);
+		return (1);
+	}
+	if (init_forks(sim))
+	{
+		pthread_mutex_destroy(&sim->print_mutex);
+		pthread_mutex_destroy(&sim->stop_mutex);
+		return (1);
+	}
+	if (init_philos(sim))
+	{
+		pthread_mutex_destroy(&sim->print_mutex);
+		pthread_mutex_destroy(&sim->stop_mutex);
+		free(sim->forks);
+		return (1);
+	}
+	return (0);
+}
+
+void	cleanup_sim(t_sim *sim)
+{
+	int	i;
+
+	i = 0;
+	while (i < sim->config.num_philos)
+	{
+		pthread_mutex_destroy(&sim->philos[i].meal_mutex);
+		pthread_mutex_destroy(&sim->forks[i]);
+		i++;
+	}
+	pthread_mutex_destroy(&sim->print_mutex);
+	pthread_mutex_destroy(&sim->stop_mutex);
+	free(sim->philos);
+	free(sim->forks);
+}
+
+int	start_sim(t_sim *sim)
+{
+	int			i;
+	pthread_t	monitor;
+
+	sim->start_time = get_time_ms();
+	i = 0;
+	while (i < sim->config.num_philos)
+	{
+		sim->philos[i].last_meal = sim->start_time;
+		i++;
+	}
+	i = 0;
+	while (i < sim->config.num_philos)
+	{
+		if (pthread_create(&sim->philos[i].thread, NULL,
+				philo_routine, &sim->philos[i]))
+			return (1);
+		i++;
+	}
+	if (pthread_create(&monitor, NULL, monitor_routine, sim))
+		return (1);
+	i = 0;
+	while (i < sim->config.num_philos)
+	{
+		pthread_join(sim->philos[i].thread, NULL);
+		i++;
+	}
+	pthread_join(monitor, NULL);
 	return (0);
 }
 
@@ -522,55 +450,12 @@ int	main(int argc, char **argv)
 		printf("Error: Failed to initialize simulation.\n");
 		return (1);
 	}
-	// Start threads
-	int	i;
-	i = 0;
-	while (i < sim.config.num_philos)
+	if (start_sim(&sim))
 	{
-		if (pthread_create(&sim.philos[i].thread, NULL, philo_routine, &sim.philos[i]))
-		{
-			printf("Error: Failed to create philosopher thread.\n");
-			// Cleanup
-			while (--i >= 0)
-				pthread_join(sim.philos[i].thread, NULL);
-			free(sim.philos);
-			free(sim.forks);
-			return (1);
-		}
-		i++;
-	}
-	pthread_t	monitor_thread;
-	if (pthread_create(&monitor_thread, NULL, monitor_routine, &sim))
-	{
-		printf("Error: Failed to create monitor thread.\n");
-		i = 0;
-		while (i < sim.config.num_philos)
-			pthread_join(sim.philos[i++].thread, NULL);
-		free(sim.philos);
-		free(sim.forks);
+		cleanup_sim(&sim);
+		printf("Error: Failed to start simulation.\n");
 		return (1);
 	}
-	// Wait for threads
-	i = 0;
-	while (i < sim.config.num_philos)
-	{
-		pthread_join(sim.philos[i].thread, NULL);
-		i++;
-	}
-	pthread_join(monitor_thread, NULL);
-	// Cleanup
-	i = 0;
-	while (i < sim.config.num_philos)
-	{
-		pthread_mutex_destroy(&sim.philos[i].data_mutex);
-		i++;
-	}
-	pthread_mutex_destroy(&sim.died_mutex);
-	i = 0;
-	while (i < sim.config.num_philos)
-		pthread_mutex_destroy(&sim.forks[i++]);
-	pthread_mutex_destroy(&sim.print_mutex);
-	free(sim.philos);
-	free(sim.forks);
+	cleanup_sim(&sim);
 	return (0);
 }
